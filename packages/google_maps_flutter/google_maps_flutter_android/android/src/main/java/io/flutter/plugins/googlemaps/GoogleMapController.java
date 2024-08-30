@@ -54,6 +54,64 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 
+// method call handler
+import io.flutter.plugin.common.MethodCall;
+import io.flutter.plugin.common.MethodChannel;
+import io.flutter.plugin.common.MethodChannel.MethodCallHandler;
+import io.flutter.plugin.common.MethodChannel.Result;
+import io.flutter.plugin.common.PluginRegistry.Registrar;
+
+//map controller
+import com.google.android.gms.maps.CameraUpdate;
+import com.google.android.gms.maps.CameraUpdateFactory;
+import com.google.android.gms.maps.GoogleMap;
+import com.google.android.gms.maps.CameraUpdateFactory;
+import com.google.android.gms.maps.model.LatLng;
+import com.google.android.gms.maps.model.LatLngBounds;
+
+//kml
+import io.flutter.plugin.platform.PlatformView;
+import com.google.android.gms.maps.CameraUpdate;
+import com.google.maps.android.data.kml.KmlContainer;
+import com.google.maps.android.data.kml.KmlLayer;
+import com.google.maps.android.data.kml.KmlPlacemark;
+import com.google.maps.android.data.kml.KmlPolygon;
+import com.google.maps.android.data.kml.KmlPoint;
+import com.google.maps.android.data.kml.KmlLineString;
+import com.google.maps.android.data.kml.KmlMultiGeometry;
+import org.xmlpull.v1.XmlPullParserException;
+
+// reading a file
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.net.URL;
+import java.util.stream.Collectors;
+
+//geojson
+import com.google.maps.android.data.geojson.GeoJsonFeature;
+import com.google.maps.android.data.geojson.GeoJsonLineString;
+import com.google.maps.android.data.geojson.GeoJsonLayer;
+import com.google.maps.android.data.geojson.GeoJsonMultiPolygon;
+import com.google.maps.android.data.geojson.GeoJsonPoint;
+import com.google.maps.android.data.geojson.GeoJsonPolygon;
+import org.json.JSONObject;
+import org.json.JSONException;
+
+//heatmaps
+import com.google.android.gms.maps.model.TileOverlayOptions;
+import com.google.maps.android.heatmaps.HeatmapTileProvider;
+import com.google.maps.android.heatmaps.WeightedLatLng;
+
+//clustering
+import com.google.maps.android.clustering.ClusterManager;
+import com.google.maps.android.clustering.view.DefaultClusterRenderer;
+import com.google.maps.android.clustering.ClusterItem;
+import io.flutter.plugins.googlemaps.models.MyItem;
+
 /** Controller of a single GoogleMaps MapView instance. */
 class GoogleMapController
     implements ActivityPluginBinding.OnSaveInstanceStateListener,
