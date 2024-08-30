@@ -363,6 +363,10 @@ class GoogleMapController
   }
   // added method channel communications and layer functions
   private KmlLayer currentKmlLayer = null;
+  private GeoJsonLayer currentGeoJsonLayer = null;
+  private TileOverlay heatmapOverlay = null;
+  private ClusterManager<MyItem> clusterManager = null;
+  
   @Override
   public void onMethodCall(MethodCall call, MethodChannel.Result result) {
 
@@ -370,6 +374,12 @@ class GoogleMapController
       case "map#addKML": {
         int resourceId = call.argument("resourceId");
         addKMLLayer(resourceId);
+        result.success(null);
+        break;
+      }
+      case "map#addGeoJSON": {
+        int resourceId = call.argument("resourceId");
+        addGeoJSON(resourceId);
         result.success(null);
         break;
       }
@@ -487,6 +497,96 @@ class GoogleMapController
 
     return hasGeometry;
   }
+
+  // GEOJSON layer functions //
+
+  // move maps camera to the layer
+  private void moveCameraToGeoJson(GeoJsonLayer geoJsonLayer) {
+    try {
+      LatLngBounds.Builder builder = new LatLngBounds.Builder();
+      boolean hasGeometry = false;
+
+      // Iterate through features in the GeoJsonLayer
+      for (GeoJsonFeature feature : geoJsonLayer.getFeatures()) {
+        if (feature.getGeometry() != null) {
+          if (feature.getGeometry() instanceof GeoJsonPoint) {
+            GeoJsonPoint point = (GeoJsonPoint) feature.getGeometry();
+            builder.include(point.getCoordinates());
+            hasGeometry = true;
+          } else if (feature.getGeometry() instanceof GeoJsonPolygon) {
+            GeoJsonPolygon polygon = (GeoJsonPolygon) feature.getGeometry();
+            for (List<LatLng> outerBoundary : polygon.getCoordinates()) {
+              for (LatLng latLng : outerBoundary) {
+                builder.include(latLng);
+              }
+            }
+            hasGeometry = true;
+          } else if (feature.getGeometry() instanceof GeoJsonLineString) {
+            GeoJsonLineString lineString = (GeoJsonLineString) feature.getGeometry();
+            for (LatLng latLng : lineString.getCoordinates()) {
+              builder.include(latLng);
+            }
+            hasGeometry = true;
+          } else if (feature.getGeometry() instanceof GeoJsonMultiPolygon) {
+            GeoJsonMultiPolygon multiPolygon = (GeoJsonMultiPolygon) feature.getGeometry();
+            for (GeoJsonPolygon polygon : multiPolygon.getPolygons()) {
+              for (List<LatLng> outerBoundary : polygon.getCoordinates()) {
+                for (LatLng latLng : outerBoundary) {
+                  builder.include(latLng);
+                }
+              }
+            }
+            hasGeometry = true;
+          }
+        }
+      }
+
+      if (hasGeometry) {
+        LatLngBounds bounds = builder.build();
+        int width = context.getResources().getDisplayMetrics().widthPixels;
+        int height = context.getResources().getDisplayMetrics().heightPixels;
+
+        // Create CameraUpdate to fit all geometries within bounds
+        CameraUpdate cameraUpdate = CameraUpdateFactory.newLatLngBounds(bounds, width, height, 0);
+
+        // Move the camera to the GeoJSON layer bounds
+        googleMap.animateCamera(cameraUpdate);
+      } else {
+        Log.d("moveCameraToGeoJson", "No geometry found in GeoJSON to move camera.");
+      }
+    } catch (Exception e) {
+      e.printStackTrace();
+    }
+  }
+
+  // fetch GeoJSON resource
+  private String loadGeoJsonFromResource(int resourceId) throws IOException {
+    InputStream inputStream = context.getResources().openRawResource(resourceId);
+    StringBuilder builder = new StringBuilder();
+    BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream));
+    String line;
+    while ((line = reader.readLine()) != null) {
+      builder.append(line);
+    }
+    reader.close();
+    return builder.toString();
+  }
+
+  // add GeoJSON layer to the map
+  private void addGeoJSON(int resourceId) {
+    try {
+      String geoJsonData = loadGeoJsonFromResource(resourceId);
+      JSONObject geoJsonObject = new JSONObject(geoJsonData);
+      currentGeoJsonLayer = new GeoJsonLayer(googleMap, geoJsonObject);
+      currentGeoJsonLayer.addLayerToMap();
+      moveCameraToGeoJson(currentGeoJsonLayer);
+    } catch (IOException | JSONException e) {
+      e.printStackTrace();
+
+    }
+  }
+    
+
 
   @Override
   public void onMapClick(@NonNull LatLng latLng) {
