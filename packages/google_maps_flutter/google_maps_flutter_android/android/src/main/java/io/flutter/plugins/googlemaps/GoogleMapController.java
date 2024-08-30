@@ -395,6 +395,27 @@ class GoogleMapController
         addKmlClustering(resourceId);
         break;
       }
+      case "map#removeLayers": {
+        if (currentKmlLayer != null) {
+          currentKmlLayer.removeLayerFromMap();
+          currentKmlLayer = null;
+        }
+        // Remove GeoJSON layer if present
+        if (currentGeoJsonLayer != null) {
+          currentGeoJsonLayer.removeLayerFromMap();
+          currentGeoJsonLayer = null;
+        }
+        if (heatmapOverlay != null) {
+          heatmapOverlay.remove();
+          heatmapOverlay = null; // Reset the variable to avoid trying to remove it again
+        }
+        if (clusterManager != null) {
+          clusterManager.clearItems();
+          clusterManager.cluster();
+          clusterManager = null;
+        }
+        break;
+      }
       default:
         result.notImplemented();
 
