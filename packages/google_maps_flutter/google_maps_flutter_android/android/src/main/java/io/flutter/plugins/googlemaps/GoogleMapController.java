@@ -361,6 +361,132 @@ class GoogleMapController
           }
         });
   }
+  // added method channel communications and layer functions
+  private KmlLayer currentKmlLayer = null;
+  @Override
+  public void onMethodCall(MethodCall call, MethodChannel.Result result) {
+
+    switch (call.method) {
+      case "map#addKML": {
+        int resourceId = call.argument("resourceId");
+        addKMLLayer(resourceId);
+        result.success(null);
+        break;
+      }
+     
+      default:
+        result.notImplemented();
+
+    }
+  }
+  // KML layer functions //
+  // function to add KML layer to the screen
+  private void addKMLLayer(int resourceId) {
+    try {
+      currentKmlLayer = new KmlLayer(googleMap, resourceId, context);
+      Log.d("ADDKML", "KML layer fetched");
+      currentKmlLayer.addLayerToMap();
+      Log.d("ADDKML", "KML layer added to the map");
+      moveCameraToKml(currentKmlLayer);
+
+    } catch (XmlPullParserException | IOException e) {
+      e.printStackTrace();
+    }
+  }
+
+  // move camera to the layer on map
+  private void moveCameraToKml(KmlLayer kmlLayer) {
+    if (kmlLayer == null || googleMap == null) {
+      return;
+    }
+
+    try {
+      LatLngBounds.Builder builder = new LatLngBounds.Builder();
+      boolean hasGeometry = false;
+
+      // Process all containers recursively
+      for (KmlContainer container : kmlLayer.getContainers()) {
+        hasGeometry = processContainer(container, builder) || hasGeometry;
+      }
+
+      if (hasGeometry) {
+        LatLngBounds bounds = builder.build();
+        Log.d("Bounds", "Southwest: " + bounds.southwest + ", Northeast: " + bounds.northeast);
+
+        int width = context.getResources().getDisplayMetrics().widthPixels;
+        int height = context.getResources().getDisplayMetrics().heightPixels;
+
+        googleMap.animateCamera(CameraUpdateFactory.newLatLngBounds(bounds, width, height, 1));
+      } else {
+        Log.d("moveCameraToKml", "No geometry found in KML to move camera.");
+      }
+
+    } catch (Exception e) {
+      e.printStackTrace();
+    }
+  }
+
+  // process any multi-layer kml data
+  private boolean processContainer(KmlContainer container, LatLngBounds.Builder builder) {
+    boolean hasGeometry = false;
+
+    for (KmlPlacemark placemark : container.getPlacemarks()) {
+      if (placemark.getGeometry() instanceof KmlPolygon) {
+        KmlPolygon polygon = (KmlPolygon) placemark.getGeometry();
+        for (LatLng latLng : polygon.getOuterBoundaryCoordinates()) {
+          builder.include(latLng);
+          hasGeometry = true;
+        }
+      } else if (placemark.getGeometry() instanceof KmlPoint) {
+        KmlPoint point = (KmlPoint) placemark.getGeometry();
+        builder.include(point.getGeometryObject());
+        // googleMap.animateCamera(CameraUpdateFactory.newLatLngZoom(point.getGeometryObject(),
+        // 15));
+        hasGeometry = true;
+      } else if (placemark.getGeometry() instanceof KmlLineString) {
+        KmlLineString lineString = (KmlLineString) placemark.getGeometry();
+        for (LatLng latLng : lineString.getGeometryObject()) {
+          builder.include(latLng);
+          hasGeometry = true;
+        }
+      } else if (placemark.getGeometry() instanceof KmlMultiGeometry) {
+        // Handle MultiGeometry
+        KmlMultiGeometry multiGeometry = (KmlMultiGeometry) placemark.getGeometry();
+        for (Object geometry : multiGeometry.getGeometryObject()) {
+          if (geometry instanceof KmlPolygon) {
+            KmlPolygon polygon = (KmlPolygon) geometry;
+            for (LatLng latLng : polygon.getOuterBoundaryCoordinates()) {
+              Log.d("processContainer", "MultiGeometry Polygon Point: " + latLng.toString());
+              builder.include(latLng);
+              hasGeometry = true;
+            }
+          } else if (geometry instanceof KmlPoint) {
+            KmlPoint point = (KmlPoint) geometry;
+            Log.d("processContainer", "MultiGeometry Point: " + point.getGeometryObject().toString());
+            builder.include(point.getGeometryObject());
+            hasGeometry = true;
+          } else if (geometry instanceof KmlLineString) {
+            KmlLineString lineString = (KmlLineString) geometry;
+            for (LatLng latLng : lineString.getGeometryObject()) {
+              Log.d("processContainer", "MultiGeometry LineString Point: " + latLng.toString());
+              builder.include(latLng);
+              hasGeometry = true;
+            }
+          }
+        }
+      } else {
+        Log.d("processContainer", "Unknown geometry type: " + placemark.getGeometry().getGeometryType());
+      }
+    }
+
+    // Recursively process nested containers
+    for (KmlContainer nestedContainer : container.getContainers()) {
+      hasGeometry = processContainer(nestedContainer, builder) || hasGeometry;
+
+    }
+
+    return hasGeometry;
+  }
 
   @Override
   public void onMapClick(@NonNull LatLng latLng) {
