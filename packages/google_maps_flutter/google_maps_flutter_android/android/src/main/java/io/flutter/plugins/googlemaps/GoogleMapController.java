@@ -389,6 +389,12 @@ class GoogleMapController
         addGeoJSONHeatmap(resourceId);
         break;
       }
+      case "map#addClustering": {
+        int resourceId = call.argument("resourceId");
+        addGeoJSONClustering(resourceId);
+        addKmlClustering(resourceId);
+        break;
+      }
       default:
         result.notImplemented();
 
@@ -708,6 +714,95 @@ class GoogleMapController
       geoJsonLayer.removeLayerFromMap();
       heatmapOverlay = googleMap.addTileOverlay(new TileOverlayOptions().tileProvider(heatmapTileProvider));
 
+    } catch (Exception e) {
+      e.printStackTrace();
+    }
+
+  }
+
+  // Clustering functions //
+  // ->KML clustering functions
+  private void addKmlClustering(int resId) {
+    try {
+      KmlLayer kmlLayer = new KmlLayer(googleMap, resId, context);
+      kmlLayer.addLayerToMap();
+      clusterManager = new ClusterManager<>(context, googleMap);
+      googleMap.setOnCameraIdleListener(clusterManager);
+      googleMap.setOnMarkerClickListener(clusterManager);
+
+      List<LatLng> points = new ArrayList<>();
+      extractKmlGeometries(kmlLayer, points);
+      if (points.isEmpty()) {
+        Log.d("addKmlClustering", "No points found in KML for Clustering.");
+        return;
+      }
+      moveCameraToKml(kmlLayer);
+      kmlLayer.removeLayerFromMap();
+
+      for (LatLng point : points) {
+        clusterManager.addItem(new MyItem(point.latitude, point.longitude, "", ""));
+      }
+
+      clusterManager.cluster(); // Perform clustering
+
+    } catch (Exception e) {
+      Log.d("addKmlClustering", "Error processing KML: " + e.getMessage());
+      e.printStackTrace();
+    }
+  }
+
+  // -> GeoJSON Clustering function
+  private void addGeoJSONClustering(int resId) {
+    try {
+      String geoJsonData = loadGeoJsonFromResource(resId);
+      JSONObject geoJsonObject = new JSONObject(geoJsonData);
+      GeoJsonLayer geoJsonLayer = new GeoJsonLayer(googleMap, geoJsonObject);
+      geoJsonLayer.addLayerToMap();
+      clusterManager = new ClusterManager<>(context, googleMap);
+      googleMap.setOnCameraIdleListener(clusterManager);
+      googleMap.setOnMarkerClickListener(clusterManager);
+
+      List<LatLng> points = new ArrayList<>();
+      for (GeoJsonFeature feature : geoJsonLayer.getFeatures()) {
+        if (feature.getGeometry() != null) {
+          if (feature.getGeometry() instanceof GeoJsonPoint) {
+            GeoJsonPoint point = (GeoJsonPoint) feature.getGeometry();
+            points.add(point.getCoordinates());
+
+          } else if (feature.getGeometry() instanceof GeoJsonPolygon) {
+            GeoJsonPolygon polygon = (GeoJsonPolygon) feature.getGeometry();
+            for (List<LatLng> outerBoundary : polygon.getCoordinates()) {
+              for (LatLng latLng : outerBoundary) {
+                points.add(latLng);
+              }
+            }
+
+          } else if (feature.getGeometry() instanceof GeoJsonLineString) {
+            GeoJsonLineString lineString = (GeoJsonLineString) feature.getGeometry();
+            for (LatLng latLng : lineString.getCoordinates()) {
+              points.add(latLng);
+            }
+
+          } else if (feature.getGeometry() instanceof GeoJsonMultiPolygon) {
+            GeoJsonMultiPolygon multiPolygon = (GeoJsonMultiPolygon) feature.getGeometry();
+            for (GeoJsonPolygon polygon : multiPolygon.getPolygons()) {
+              for (List<LatLng> outerBoundary : polygon.getCoordinates()) {
+                for (LatLng latLng : outerBoundary) {
+                  points.add(latLng);
+                }
+              }
+            }
+
+          }
+        }
+      }
+      // code to fetch points for heatmap
+      for (LatLng point : points) {
+        clusterManager.addItem(new MyItem(point.latitude, point.longitude, "", ""));
+      }
+      moveCameraToGeoJson(geoJsonLayer);
+      geoJsonLayer.removeLayerFromMap();
+      clusterManager.cluster(); // Perform clustering
     } catch (Exception e) {
       e.printStackTrace();
     }
