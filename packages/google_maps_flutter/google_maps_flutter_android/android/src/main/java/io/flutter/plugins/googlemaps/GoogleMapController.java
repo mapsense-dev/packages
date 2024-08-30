@@ -123,6 +123,7 @@ class GoogleMapController
         MapsApi,
         MapsInspectorApi,
         OnMapReadyCallback,
+        MethodChannel.MethodCallHandler,
         PlatformView {
 
   private static final String TAG = "GoogleMapController";
@@ -164,6 +165,7 @@ class GoogleMapController
   private @Nullable String initialMapStyle;
   private boolean lastSetStyleSucceeded;
   @VisibleForTesting List<Float> initialPadding;
+  private String CHANNEL = "plugins.flutter.dev/google_maps_android_0";
 
   GoogleMapController(
       int id,
@@ -181,6 +183,9 @@ class GoogleMapController
     MapsApi.setUp(binaryMessenger, Integer.toString(id), this);
     MapsInspectorApi.setUp(binaryMessenger, Integer.toString(id), this);
     AssetManager assetManager = context.getAssets();
+     // these lines are added for the native method channel to communicate with flutter app
+     MethodChannel methodChannel = new MethodChannel(binaryMessenger, CHANNEL);
+     methodChannel.setMethodCallHandler(this);
     this.lifecycleProvider = lifecycleProvider;
     this.clusterManagersController = new ClusterManagersController(flutterApi, context);
     this.markersController =
