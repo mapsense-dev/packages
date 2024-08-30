@@ -366,7 +366,7 @@ class GoogleMapController
   private GeoJsonLayer currentGeoJsonLayer = null;
   private TileOverlay heatmapOverlay = null;
   private ClusterManager<MyItem> clusterManager = null;
-  
+
   @Override
   public void onMethodCall(MethodCall call, MethodChannel.Result result) {
 
@@ -383,7 +383,12 @@ class GoogleMapController
         result.success(null);
         break;
       }
-     
+      case "map#addHeatMap": {
+        int resourceId = call.argument("resourceId");
+        addKmlHeatmap(resourceId);
+        addGeoJSONHeatmap(resourceId);
+        break;
+      }
       default:
         result.notImplemented();
 
@@ -585,6 +590,130 @@ class GoogleMapController
 
     }
   }
+
+  // HeatMap function //
+  // ->KML HeatMap functions
+  private void addKmlHeatmap(int resId) {
+    try {
+      KmlLayer kmlLayer = new KmlLayer(googleMap, resId, context);
+      kmlLayer.addLayerToMap();
+      Log.d("Heatmap", "KML file loaded successfully.");
+
+      List<LatLng> points = new ArrayList<>();
+      extractKmlGeometries(kmlLayer, points);
+
+      if (points.isEmpty()) {
+        Log.d("Heatmap", "No points found in KML for heatmap.");
+        return;
+      }
+
+      HeatmapTileProvider heatmapTileProvider = new HeatmapTileProvider.Builder()
+          .data(points)
+          .build();
+      moveCameraToKml(kmlLayer);
+      kmlLayer.removeLayerFromMap();
+
+      heatmapOverlay = googleMap.addTileOverlay(new TileOverlayOptions().tileProvider(heatmapTileProvider));
+      Log.d("Heatmap", "Heatmap added to the map.");
+    } catch (Exception e) {
+      Log.e("Heatmap", "Error adding KML heatmap", e);
+    }
+  }
+
+  private void extractKmlGeometries(KmlLayer kmlLayer, List<LatLng> points) {
+    if (kmlLayer != null) {
+      for (KmlContainer container : kmlLayer.getContainers()) {
+        if (container != null) {
+          Log.d("addKML", "Extracting geometries from container: " + container.getContainerId());
+          extractGeometriesFromContainer(container, points);
+        } else {
+          Log.d("addKML", "Container is null.");
+        }
+      }
+    } else {
+      Log.d("addKML", "KmlLayer is null.");
+    }
+  }
+
+  private void extractGeometriesFromContainer(KmlContainer container, List<LatLng> points) {
+    // Extract geometries from the container
+    for (KmlPlacemark placemark : container.getPlacemarks()) {
+      if (placemark != null && placemark.getGeometry() instanceof KmlPoint) {
+        KmlPoint point = (KmlPoint) placemark.getGeometry();
+        LatLng latLng = point.getGeometryObject();
+        if (latLng != null) {
+          points.add(latLng);
+          Log.d("Heatmap", "Added point to heatmap: " + latLng.toString());
+        } else {
+          Log.d("Heatmap", "Point geometry is null.");
+        }
+      } else {
+        Log.d("Heatmap", "Geometry is not a KmlPoint or placemark is null.");
+      }
+    }
+
+    // Recursively handle nested containers
+    for (KmlContainer nestedContainer : container.getContainers()) {
+      extractGeometriesFromContainer(nestedContainer, points);
+    }
+  }
+
+  // ->GeoJSON Heatmap functions
+  private void addGeoJSONHeatmap(int resId) {
+
+    ArrayList<WeightedLatLng> heatmapPoints = new ArrayList<>();
+    try {
+      String geoJsonData = loadGeoJsonFromResource(resId);
+      JSONObject geoJsonObject = new JSONObject(geoJsonData);
+      GeoJsonLayer geoJsonLayer = new GeoJsonLayer(googleMap, geoJsonObject);
+      geoJsonLayer.addLayerToMap();
+      for (GeoJsonFeature feature : geoJsonLayer.getFeatures()) {
+        if (feature.getGeometry() != null) {
+          if (feature.getGeometry() instanceof GeoJsonPoint) {
+            GeoJsonPoint point = (GeoJsonPoint) feature.getGeometry();
+            heatmapPoints.add(new WeightedLatLng(point.getCoordinates()));
+
+          } else if (feature.getGeometry() instanceof GeoJsonPolygon) {
+            GeoJsonPolygon polygon = (GeoJsonPolygon) feature.getGeometry();
+            for (List<LatLng> outerBoundary : polygon.getCoordinates()) {
+              for (LatLng latLng : outerBoundary) {
+                heatmapPoints.add(new WeightedLatLng(latLng));
+              }
+            }
+
+          } else if (feature.getGeometry() instanceof GeoJsonLineString) {
+            GeoJsonLineString lineString = (GeoJsonLineString) feature.getGeometry();
+            for (LatLng latLng : lineString.getCoordinates()) {
+              heatmapPoints.add(new WeightedLatLng(latLng));
+            }
+
+          } else if (feature.getGeometry() instanceof GeoJsonMultiPolygon) {
+            GeoJsonMultiPolygon multiPolygon = (GeoJsonMultiPolygon) feature.getGeometry();
+            for (GeoJsonPolygon polygon : multiPolygon.getPolygons()) {
+              for (List<LatLng> outerBoundary : polygon.getCoordinates()) {
+                for (LatLng latLng : outerBoundary) {
+                  heatmapPoints.add(new WeightedLatLng(latLng));
+                }
+              }
+            }
+
+          }
+        }
+      }
+      HeatmapTileProvider heatmapTileProvider = new HeatmapTileProvider.Builder()
+          .weightedData(heatmapPoints)
+          .radius(50) // Customize the radius
+          .build();
+      moveCameraToGeoJson(geoJsonLayer);
+      geoJsonLayer.removeLayerFromMap();
+      heatmapOverlay = googleMap.addTileOverlay(new TileOverlayOptions().tileProvider(heatmapTileProvider));
+
+    } catch (Exception e) {
+      e.printStackTrace();
+    }
+
+  }
+
     
 
 
