@@ -91,6 +91,10 @@ import java.io.InputStreamReader;
 import java.net.URL;
 import java.util.stream.Collectors;
 
+// add online data
+import java.io.File;
+import java.io.FileInputStream;
+
 //geojson
 import com.google.maps.android.data.geojson.GeoJsonFeature;
 import com.google.maps.android.data.geojson.GeoJsonLineString;
@@ -395,6 +399,22 @@ class GoogleMapController
         addKmlClustering(resourceId);
         break;
       }
+      case "map#addOnlineData": {
+        String filePath = call.argument("filePath");
+        String fileName = filePath.toLowerCase();
+
+        if (fileName.endsWith(".kml")) {
+            // If the file is a KML file
+            addKmlLayerFromFilePath(googleMap, filePath, context);
+        } else if (fileName.endsWith(".geojson") || fileName.endsWith(".json")) {
+            // If the file is a GeoJSON file
+            addGeoJsonLayerFromFilePath(googleMap, filePath);
+        } else {
+            Log.e("LayerError", "Unsupported file type: " + filePath);
+        }
+        
+        break;
+      }
       case "map#removeLayers": {
         if (currentKmlLayer != null) {
           currentKmlLayer.removeLayerFromMap();
@@ -435,6 +455,39 @@ class GoogleMapController
       e.printStackTrace();
     }
   }
+
+  //add layer from path 
+  // we have stored the online data in temporary directory
+  public void addKmlLayerFromFilePath(GoogleMap googleMap, String filePath, Context context) {
+    try {
+        // Create a File object from the file path
+       try {
+               // Create a File object from the file path
+               File file = new File(filePath);
+       
+               // Log the file path
+               Log.d("KML", "Loading KML file from: " + filePath);
+       
+               // Get an InputStream from the file
+               InputStream inputStream = new FileInputStream(file);
+       
+               // Create a KmlLayer from the InputStream
+              currentKmlLayer = new KmlLayer(googleMap, inputStream, context);
+       
+               // Add the KML layer to the map
+               currentKmlLayer.addLayerToMap();
+       
+               // Move the camera to the KML layer bounds
+               moveCameraToKml(currentKmlLayer);
+       
+           } catch (Exception e) {
+               e.printStackTrace();
+           }
+
+    } catch (Exception e) {
+        e.printStackTrace();
+    }
+}
 
   // move camera to the layer on map
   private void moveCameraToKml(KmlLayer kmlLayer) {
@@ -617,6 +670,36 @@ class GoogleMapController
 
     }
   }
+
+  //online data function
+  public void addGeoJsonLayerFromFilePath(GoogleMap googleMap, String filePath) {
+    try {
+        // Create a File object from the file path
+        File file = new File(filePath);
+
+        // Log the file path
+        Log.d("GeoJson", "Loading GeoJSON file from: " + filePath);
+       
+
+        // Get an InputStream from the file
+        InputStream inputStream = new FileInputStream(file);
+        StringBuilder builder = new StringBuilder();
+    BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream));
+    String line;
+    while ((line = reader.readLine()) != null) {
+      builder.append(line);
+    }
+    reader.close();
+        String geoJsonDataString = builder.toString();
+        JSONObject geoJsonObject = new JSONObject(geoJsonDataString);
+        currentGeoJsonLayer = new GeoJsonLayer(googleMap, geoJsonObject);
+        currentGeoJsonLayer.addLayerToMap();
+        moveCameraToGeoJson(currentGeoJsonLayer);
+
+    } catch (Exception e) {
+        e.printStackTrace();
+    }
+}
 
   // HeatMap function //
   // ->KML HeatMap functions
