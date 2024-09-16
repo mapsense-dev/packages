@@ -117,6 +117,15 @@ import com.google.maps.android.clustering.view.DefaultClusterRenderer;
 import com.google.maps.android.clustering.ClusterItem;
 import io.flutter.plugins.googlemaps.models.MyItem;
 
+//custom icons
+import com.google.android.gms.maps.model.BitmapDescriptorFactory;
+import com.google.android.gms.maps.model.MarkerOptions;
+import com.google.android.gms.maps.model.BitmapDescriptor;
+import android.content.Context;
+import android.graphics.Bitmap;
+import android.graphics.Color;
+import android.graphics.BitmapFactory;
+
 /** Controller of a single GoogleMaps MapView instance. */
 class GoogleMapController
     implements ActivityPluginBinding.OnSaveInstanceStateListener,
@@ -662,6 +671,29 @@ class GoogleMapController
     reader.close();
     return builder.toString();
   }
+
+  private BitmapDescriptor getCustomMarkerIcon(String assetPath) {
+    try {
+
+      Bitmap bitmap = BitmapFactory.decodeStream(context.getAssets().open(assetPath));
+      int defaultMarkerSize = (int) (30 *
+          context.getResources().getDisplayMetrics().density);
+
+      // Resize the bitmap to match the default marker size
+      Bitmap resizedBitmap = Bitmap.createScaledBitmap(bitmap, defaultMarkerSize,
+          defaultMarkerSize, false);
+
+      // Return resized custom marker icon
+      return BitmapDescriptorFactory.fromBitmap(resizedBitmap);
+
+    } catch (Exception e) {
+      e.printStackTrace();
+      Log.d("CustomMarker", e.toString());
+      // Return a default marker if custom marker fails
+      return BitmapDescriptorFactory.defaultMarker();
+    }
+  }
+
 
   // custom point style for a geojson layer
   private void getMarkerStyleForGeoJSON(GeoJsonLayer geojsonLayer,String assetPath){
