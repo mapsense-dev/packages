@@ -102,6 +102,7 @@ import com.google.maps.android.data.geojson.GeoJsonLayer;
 import com.google.maps.android.data.geojson.GeoJsonMultiPolygon;
 import com.google.maps.android.data.geojson.GeoJsonPoint;
 import com.google.maps.android.data.geojson.GeoJsonPolygon;
+import com.google.maps.android.data.geojson.GeoJsonPointStyle;
 import org.json.JSONObject;
 import org.json.JSONException;
 
@@ -383,7 +384,7 @@ class GoogleMapController
       }
       case "map#addGeoJSON": {
         int resourceId = call.argument("resourceId");
-        addGeoJSON(resourceId);
+        addGeoJSON(resourceId,"");
         result.success(null);
         break;
       }
@@ -413,6 +414,11 @@ class GoogleMapController
             Log.e("LayerError", "Unsupported file type: " + filePath);
         }
         
+        break;
+      }
+      case "map#addMetroData": {
+        int resourceId = call.argument("resourceId");
+        addGeoJSON(resourceId, "icons/train-subway-solid.png");
         break;
       }
       case "map#removeLayers": {
@@ -657,12 +663,41 @@ class GoogleMapController
     return builder.toString();
   }
 
+  // custom point style for a geojson layer
+  private void getMarkerStyleForGeoJSON(GeoJsonLayer geojsonLayer,String assetPath){
+    for (GeoJsonFeature feature : geojsonLayer.getFeatures()) {
+      if (feature.getGeometry() != null) {
+        if (feature.getGeometry() instanceof GeoJsonPoint) {
+          GeoJsonPoint point = (GeoJsonPoint) feature.getGeometry();
+          LatLng position = point.getCoordinates();
+
+          // Check if the feature has a style with a marker icon
+          if (feature.getPointStyle() == null || feature.getPointStyle().getIcon() == null) {
+            GeoJsonPointStyle customPointStyle = new GeoJsonPointStyle();
+            BitmapDescriptor customIcon;
+            if (assetPath == null || assetPath.isEmpty()) {
+              customIcon = getCustomMarkerIcon("icons/default_map_marker.png");
+            } else {
+              customIcon = getCustomMarkerIcon(assetPath);
+            }
+            customPointStyle.setIcon(customIcon);
+
+            // Set the style for the feature
+            feature.setPointStyle(customPointStyle);
+          }
+
+        }
+      }
+    } 
+  }
+
   // add GeoJSON layer to the map
-  private void addGeoJSON(int resourceId) {
+  private void addGeoJSON(int resourceId, String assetPath) {
     try {
       String geoJsonData = loadGeoJsonFromResource(resourceId);
       JSONObject geoJsonObject = new JSONObject(geoJsonData);
       currentGeoJsonLayer = new GeoJsonLayer(googleMap, geoJsonObject);
+      getMarkerStyleForGeoJSON(currentGeoJsonLayer, assetPath);
       currentGeoJsonLayer.addLayerToMap();
       moveCameraToGeoJson(currentGeoJsonLayer);
     } catch (IOException | JSONException e) {
@@ -693,6 +728,7 @@ class GoogleMapController
         String geoJsonDataString = builder.toString();
         JSONObject geoJsonObject = new JSONObject(geoJsonDataString);
         currentGeoJsonLayer = new GeoJsonLayer(googleMap, geoJsonObject);
+        getMarkerStyleForGeoJSON(currentGeoJsonLayer, assetPath);
         currentGeoJsonLayer.addLayerToMap();
         moveCameraToGeoJson(currentGeoJsonLayer);
 
