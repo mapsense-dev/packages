@@ -760,7 +760,7 @@ class GoogleMapController
         String geoJsonDataString = builder.toString();
         JSONObject geoJsonObject = new JSONObject(geoJsonDataString);
         currentGeoJsonLayer = new GeoJsonLayer(googleMap, geoJsonObject);
-        getMarkerStyleForGeoJSON(currentGeoJsonLayer, assetPath);
+        getMarkerStyleForGeoJSON(currentGeoJsonLayer, "");
         currentGeoJsonLayer.addLayerToMap();
         moveCameraToGeoJson(currentGeoJsonLayer);
 
