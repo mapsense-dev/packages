@@ -116,6 +116,7 @@ import com.google.maps.android.clustering.ClusterManager;
 import com.google.maps.android.clustering.view.DefaultClusterRenderer;
 import com.google.maps.android.clustering.ClusterItem;
 import io.flutter.plugins.googlemaps.models.MyItem;
+import io.flutter.plugins.googlemaps.models.CustomClusterRenderer;
 
 //custom icons
 import com.google.android.gms.maps.model.BitmapDescriptorFactory;
@@ -380,6 +381,7 @@ class GoogleMapController
   private GeoJsonLayer currentGeoJsonLayer = null;
   private TileOverlay heatmapOverlay = null;
   private ClusterManager<MyItem> clusterManager = null;
+  private CustomClusterRenderer<MyItem> customClusterRenderer = null;
 
   @Override
   public void onMethodCall(MethodCall call, MethodChannel.Result result) {
@@ -405,8 +407,14 @@ class GoogleMapController
       }
       case "map#addClustering": {
         int resourceId = call.argument("resourceId");
-        addGeoJSONClustering(resourceId);
-        addKmlClustering(resourceId);
+        clusterManager = new ClusterManager<MyItem>(context, googleMap);
+        customClusterRenderer = new CustomClusterRenderer<MyItem>(context, googleMap, clusterManager);
+        googleMap.setOnCameraIdleListener(clusterManager);
+        googleMap.setOnMarkerClickListener(clusterManager);
+        clusterManager.setRenderer(customClusterRenderer);
+          addGeoJSONClustering(resourceId,clusterManager);
+          addKmlClustering(resourceId,clusterManager);
+        
         break;
       }
       case "map#addOnlineData": {
@@ -425,9 +433,10 @@ class GoogleMapController
         
         break;
       }
-      case "map#addMetroData": {
+      case "map#addAccessibilityData": {
         int resourceId = call.argument("resourceId");
-        addGeoJSON(resourceId, "icons/train-subway-solid.png");
+        String accessibilityType = call.argument("type");
+        addGeoJSON(resourceId, "icons/"+accessibilityType+".png");
         break;
       }
       case "map#removeLayers": {
@@ -708,7 +717,7 @@ class GoogleMapController
             GeoJsonPointStyle customPointStyle = new GeoJsonPointStyle();
             BitmapDescriptor customIcon;
             if (assetPath == null || assetPath.isEmpty()) {
-              customIcon = getCustomMarkerIcon("icons/default_map_marker.png");
+              customIcon = getCustomMarkerIcon("icons/marker.png");
             } else {
               customIcon = getCustomMarkerIcon(assetPath);
             }
@@ -894,14 +903,10 @@ class GoogleMapController
 
   // Clustering functions //
   // ->KML clustering functions
-  private void addKmlClustering(int resId) {
+  private void addKmlClustering(int resId, ClusterManager<MyItem> customClusterManager) {
     try {
       KmlLayer kmlLayer = new KmlLayer(googleMap, resId, context);
       kmlLayer.addLayerToMap();
-      clusterManager = new ClusterManager<>(context, googleMap);
-      googleMap.setOnCameraIdleListener(clusterManager);
-      googleMap.setOnMarkerClickListener(clusterManager);
-
       List<LatLng> points = new ArrayList<>();
       extractKmlGeometries(kmlLayer, points);
       if (points.isEmpty()) {
@@ -912,10 +917,10 @@ class GoogleMapController
       kmlLayer.removeLayerFromMap();
 
       for (LatLng point : points) {
-        clusterManager.addItem(new MyItem(point.latitude, point.longitude, "", ""));
+        customClusterManager.addItem(new MyItem(point.latitude, point.longitude, "", ""));
       }
 
-      clusterManager.cluster(); // Perform clustering
+      customClusterManager.cluster(); // Perform clustering
 
     } catch (Exception e) {
       Log.d("addKmlClustering", "Error processing KML: " + e.getMessage());
@@ -924,16 +929,12 @@ class GoogleMapController
   }
 
   // -> GeoJSON Clustering function
-  private void addGeoJSONClustering(int resId) {
+  private void addGeoJSONClustering(int resId ,ClusterManager<MyItem> customClusterManager) {
     try {
       String geoJsonData = loadGeoJsonFromResource(resId);
       JSONObject geoJsonObject = new JSONObject(geoJsonData);
       GeoJsonLayer geoJsonLayer = new GeoJsonLayer(googleMap, geoJsonObject);
       geoJsonLayer.addLayerToMap();
-      clusterManager = new ClusterManager<>(context, googleMap);
-      googleMap.setOnCameraIdleListener(clusterManager);
-      googleMap.setOnMarkerClickListener(clusterManager);
-
       List<LatLng> points = new ArrayList<>();
       for (GeoJsonFeature feature : geoJsonLayer.getFeatures()) {
         if (feature.getGeometry() != null) {
@@ -970,17 +971,16 @@ class GoogleMapController
       }
       // code to fetch points for heatmap
       for (LatLng point : points) {
-        clusterManager.addItem(new MyItem(point.latitude, point.longitude, "", ""));
+        customClusterManager.addItem(new MyItem(point.latitude, point.longitude, "", ""));
       }
       moveCameraToGeoJson(geoJsonLayer);
       geoJsonLayer.removeLayerFromMap();
-      clusterManager.cluster(); // Perform clustering
+      customClusterManager.cluster(); // Perform clustering
     } catch (Exception e) {
       e.printStackTrace();
     }
 
   }
-
     
 
 
