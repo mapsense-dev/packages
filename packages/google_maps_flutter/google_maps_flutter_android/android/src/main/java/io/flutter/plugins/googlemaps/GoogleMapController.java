@@ -682,19 +682,33 @@ class GoogleMapController
   }
 
   private BitmapDescriptor getCustomMarkerIcon(String assetPath) {
-    try {
+    
 
-      Bitmap bitmap = BitmapFactory.decodeStream(context.getAssets().open(assetPath));
-      int defaultMarkerSize = (int) (30 *
-          context.getResources().getDisplayMetrics().density);
-
-      // Resize the bitmap to match the default marker size
-      Bitmap resizedBitmap = Bitmap.createScaledBitmap(bitmap, defaultMarkerSize,
-          defaultMarkerSize, false);
-
-      // Return resized custom marker icon
-      return BitmapDescriptorFactory.fromBitmap(resizedBitmap);
-
+      try {
+        if(assetPath.isEmpty() || assetPath == "icons/marker.png"){
+        Bitmap bitmap = BitmapFactory.decodeStream(context.getAssets().open("icons/marker.png"));
+        int defaultMarkerSize = (int) (32 *
+            context.getResources().getDisplayMetrics().density);
+  
+        // Resize the bitmap to match the default marker size
+        Bitmap resizedBitmap = Bitmap.createScaledBitmap(bitmap, defaultMarkerSize,
+            defaultMarkerSize, false);
+  
+        // Return resized custom marker icon
+        return BitmapDescriptorFactory.fromBitmap(resizedBitmap);
+      }
+      else{
+        Bitmap bitmap = BitmapFactory.decodeStream(context.getAssets().open(assetPath));
+        int defaultMarkerSize = (int) (40 *
+            context.getResources().getDisplayMetrics().density);
+  
+        // Resize the bitmap to match the default marker size
+        Bitmap resizedBitmap = Bitmap.createScaledBitmap(bitmap, defaultMarkerSize,
+            defaultMarkerSize, false);
+  
+        // Return resized custom marker icon
+        return BitmapDescriptorFactory.fromBitmap(resizedBitmap);
+      }
     } catch (Exception e) {
       e.printStackTrace();
       Log.d("CustomMarker", e.toString());
