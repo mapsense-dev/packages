@@ -54,6 +54,79 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 
+// method call handler
+import io.flutter.plugin.common.MethodCall;
+import io.flutter.plugin.common.MethodChannel;
+import io.flutter.plugin.common.MethodChannel.MethodCallHandler;
+import io.flutter.plugin.common.MethodChannel.Result;
+import io.flutter.plugin.common.PluginRegistry.Registrar;
+
+//map controller
+import com.google.android.gms.maps.CameraUpdate;
+import com.google.android.gms.maps.CameraUpdateFactory;
+import com.google.android.gms.maps.GoogleMap;
+import com.google.android.gms.maps.CameraUpdateFactory;
+import com.google.android.gms.maps.model.LatLng;
+import com.google.android.gms.maps.model.LatLngBounds;
+
+//kml
+import io.flutter.plugin.platform.PlatformView;
+import com.google.android.gms.maps.CameraUpdate;
+import com.google.maps.android.data.kml.KmlContainer;
+import com.google.maps.android.data.kml.KmlLayer;
+import com.google.maps.android.data.kml.KmlPlacemark;
+import com.google.maps.android.data.kml.KmlPolygon;
+import com.google.maps.android.data.kml.KmlPoint;
+import com.google.maps.android.data.kml.KmlLineString;
+import com.google.maps.android.data.kml.KmlMultiGeometry;
+import org.xmlpull.v1.XmlPullParserException;
+
+// reading a file
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.net.URL;
+import java.util.stream.Collectors;
+
+// add online data
+import java.io.File;
+import java.io.FileInputStream;
+
+//geojson
+import com.google.maps.android.data.geojson.GeoJsonFeature;
+import com.google.maps.android.data.geojson.GeoJsonLineString;
+import com.google.maps.android.data.geojson.GeoJsonLayer;
+import com.google.maps.android.data.geojson.GeoJsonMultiPolygon;
+import com.google.maps.android.data.geojson.GeoJsonPoint;
+import com.google.maps.android.data.geojson.GeoJsonPolygon;
+import com.google.maps.android.data.geojson.GeoJsonPointStyle;
+import org.json.JSONObject;
+import org.json.JSONException;
+
+//heatmaps
+import com.google.android.gms.maps.model.TileOverlayOptions;
+import com.google.maps.android.heatmaps.HeatmapTileProvider;
+import com.google.maps.android.heatmaps.WeightedLatLng;
+
+//clustering
+import com.google.maps.android.clustering.ClusterManager;
+import com.google.maps.android.clustering.view.DefaultClusterRenderer;
+import com.google.maps.android.clustering.ClusterItem;
+import io.flutter.plugins.googlemaps.models.MyItem;
+import io.flutter.plugins.googlemaps.models.CustomClusterRenderer;
+
+//custom icons
+import com.google.android.gms.maps.model.BitmapDescriptorFactory;
+import com.google.android.gms.maps.model.MarkerOptions;
+import com.google.android.gms.maps.model.BitmapDescriptor;
+import android.content.Context;
+import android.graphics.Bitmap;
+import android.graphics.Color;
+import android.graphics.BitmapFactory;
+
 /** Controller of a single GoogleMaps MapView instance. */
 class GoogleMapController
     implements ActivityPluginBinding.OnSaveInstanceStateListener,
@@ -65,6 +138,7 @@ class GoogleMapController
         MapsApi,
         MapsInspectorApi,
         OnMapReadyCallback,
+        MethodChannel.MethodCallHandler,
         PlatformView {
 
   private static final String TAG = "GoogleMapController";
@@ -106,6 +180,7 @@ class GoogleMapController
   private @Nullable String initialMapStyle;
   private boolean lastSetStyleSucceeded;
   @VisibleForTesting List<Float> initialPadding;
+  private String CHANNEL = "plugins.flutter.dev/google_maps_android_0";
 
   GoogleMapController(
       int id,
@@ -123,6 +198,9 @@ class GoogleMapController
     MapsApi.setUp(binaryMessenger, Integer.toString(id), this);
     MapsInspectorApi.setUp(binaryMessenger, Integer.toString(id), this);
     AssetManager assetManager = context.getAssets();
+     // these lines are added for the native method channel to communicate with flutter app
+     MethodChannel methodChannel = new MethodChannel(binaryMessenger, CHANNEL);
+     methodChannel.setMethodCallHandler(this);
     this.lifecycleProvider = lifecycleProvider;
     this.clusterManagersController = new ClusterManagersController(flutterApi, context);
     this.markersController =
@@ -298,6 +376,627 @@ class GoogleMapController
           }
         });
   }
+  // added method channel communications and layer functions
+  private KmlLayer currentKmlLayer = null;
+  private GeoJsonLayer currentGeoJsonLayer = null;
+  private TileOverlay heatmapOverlay = null;
+  private ClusterManager<MyItem> clusterManager = null;
+  private CustomClusterRenderer<MyItem> customClusterRenderer = null;
+
+  @Override
+  public void onMethodCall(MethodCall call, MethodChannel.Result result) {
+
+    switch (call.method) {
+      case "map#addKML": {
+        int resourceId = call.argument("resourceId");
+        addKMLLayer(resourceId);
+        result.success(null);
+        break;
+      }
+      case "map#addGeoJSON": {
+        int resourceId = call.argument("resourceId");
+        addGeoJSON(resourceId,"");
+        result.success(null);
+        break;
+      }
+      case "map#addHeatMap": {
+        int resourceId = call.argument("resourceId");
+        addKmlHeatmap(resourceId);
+        addGeoJSONHeatmap(resourceId);
+        break;
+      }
+      case "map#addClustering": {
+        int resourceId = call.argument("resourceId");
+        clusterManager = new ClusterManager<MyItem>(context, googleMap);
+        customClusterRenderer = new CustomClusterRenderer<MyItem>(context, googleMap, clusterManager);
+        googleMap.setOnCameraIdleListener(clusterManager);
+        googleMap.setOnMarkerClickListener(clusterManager);
+        clusterManager.setRenderer(customClusterRenderer);
+          addGeoJSONClustering(resourceId,clusterManager);
+          addKmlClustering(resourceId,clusterManager);
+        
+        break;
+      }
+      case "map#addOnlineData": {
+        String filePath = call.argument("filePath");
+        String fileName = filePath.toLowerCase();
+
+        if (fileName.endsWith(".kml")) {
+            // If the file is a KML file
+            addKmlLayerFromFilePath(googleMap, filePath, context);
+        } else if (fileName.endsWith(".geojson") || fileName.endsWith(".json")) {
+            // If the file is a GeoJSON file
+            addGeoJsonLayerFromFilePath(googleMap, filePath);
+        } else {
+            Log.e("LayerError", "Unsupported file type: " + filePath);
+        }
+        
+        break;
+      }
+      case "map#addAccessibilityData": {
+        int resourceId = call.argument("resourceId");
+        String accessibilityType = call.argument("type");
+        addGeoJSON(resourceId, "icons/"+accessibilityType+".png");
+        break;
+      }
+      case "map#removeLayers": {
+        if (currentKmlLayer != null) {
+          currentKmlLayer.removeLayerFromMap();
+          currentKmlLayer = null;
+        }
+        // Remove GeoJSON layer if present
+        if (currentGeoJsonLayer != null) {
+          currentGeoJsonLayer.removeLayerFromMap();
+          currentGeoJsonLayer = null;
+        }
+        if (heatmapOverlay != null) {
+          heatmapOverlay.remove();
+          heatmapOverlay = null; // Reset the variable to avoid trying to remove it again
+        }
+        if (clusterManager != null) {
+          clusterManager.clearItems();
+          clusterManager.cluster();
+          clusterManager = null;
+        }
+        break;
+      }
+      default:
+        result.notImplemented();
+
+    }
+  }
+  // KML layer functions //
+  // function to add KML layer to the screen
+  private void addKMLLayer(int resourceId) {
+    try {
+      currentKmlLayer = new KmlLayer(googleMap, resourceId, context);
+      Log.d("ADDKML", "KML layer fetched");
+      currentKmlLayer.addLayerToMap();
+      Log.d("ADDKML", "KML layer added to the map");
+      moveCameraToKml(currentKmlLayer);
+
+    } catch (XmlPullParserException | IOException e) {
+      e.printStackTrace();
+    }
+  }
+
+  //add layer from path 
+  // we have stored the online data in temporary directory
+  public void addKmlLayerFromFilePath(GoogleMap googleMap, String filePath, Context context) {
+    try {
+        // Create a File object from the file path
+       try {
+               // Create a File object from the file path
+               File file = new File(filePath);
+       
+               // Log the file path
+               Log.d("KML", "Loading KML file from: " + filePath);
+       
+               // Get an InputStream from the file
+               InputStream inputStream = new FileInputStream(file);
+       
+               // Create a KmlLayer from the InputStream
+              currentKmlLayer = new KmlLayer(googleMap, inputStream, context);
+       
+               // Add the KML layer to the map
+               currentKmlLayer.addLayerToMap();
+       
+               // Move the camera to the KML layer bounds
+               moveCameraToKml(currentKmlLayer);
+       
+           } catch (Exception e) {
+               e.printStackTrace();
+           }
+
+    } catch (Exception e) {
+        e.printStackTrace();
+    }
+}
+
+  // move camera to the layer on map
+  private void moveCameraToKml(KmlLayer kmlLayer) {
+    if (kmlLayer == null || googleMap == null) {
+      return;
+    }
+
+    try {
+      LatLngBounds.Builder builder = new LatLngBounds.Builder();
+      boolean hasGeometry = false;
+
+      // Process all containers recursively
+      for (KmlContainer container : kmlLayer.getContainers()) {
+        hasGeometry = processContainer(container, builder) || hasGeometry;
+      }
+
+      if (hasGeometry) {
+        LatLngBounds bounds = builder.build();
+        Log.d("Bounds", "Southwest: " + bounds.southwest + ", Northeast: " + bounds.northeast);
+
+        int width = context.getResources().getDisplayMetrics().widthPixels;
+        int height = context.getResources().getDisplayMetrics().heightPixels;
+
+        googleMap.animateCamera(CameraUpdateFactory.newLatLngBounds(bounds, width, height, 1));
+      } else {
+        Log.d("moveCameraToKml", "No geometry found in KML to move camera.");
+      }
+
+    } catch (Exception e) {
+      e.printStackTrace();
+    }
+  }
+
+  // process any multi-layer kml data
+  private boolean processContainer(KmlContainer container, LatLngBounds.Builder builder) {
+    boolean hasGeometry = false;
+
+    for (KmlPlacemark placemark : container.getPlacemarks()) {
+      if (placemark.getGeometry() instanceof KmlPolygon) {
+        KmlPolygon polygon = (KmlPolygon) placemark.getGeometry();
+        for (LatLng latLng : polygon.getOuterBoundaryCoordinates()) {
+          builder.include(latLng);
+          hasGeometry = true;
+        }
+      } else if (placemark.getGeometry() instanceof KmlPoint) {
+        KmlPoint point = (KmlPoint) placemark.getGeometry();
+        builder.include(point.getGeometryObject());
+        // googleMap.animateCamera(CameraUpdateFactory.newLatLngZoom(point.getGeometryObject(),
+        // 15));
+        hasGeometry = true;
+      } else if (placemark.getGeometry() instanceof KmlLineString) {
+        KmlLineString lineString = (KmlLineString) placemark.getGeometry();
+        for (LatLng latLng : lineString.getGeometryObject()) {
+          builder.include(latLng);
+          hasGeometry = true;
+        }
+      } else if (placemark.getGeometry() instanceof KmlMultiGeometry) {
+        // Handle MultiGeometry
+        KmlMultiGeometry multiGeometry = (KmlMultiGeometry) placemark.getGeometry();
+        for (Object geometry : multiGeometry.getGeometryObject()) {
+          if (geometry instanceof KmlPolygon) {
+            KmlPolygon polygon = (KmlPolygon) geometry;
+            for (LatLng latLng : polygon.getOuterBoundaryCoordinates()) {
+              Log.d("processContainer", "MultiGeometry Polygon Point: " + latLng.toString());
+              builder.include(latLng);
+              hasGeometry = true;
+            }
+          } else if (geometry instanceof KmlPoint) {
+            KmlPoint point = (KmlPoint) geometry;
+            Log.d("processContainer", "MultiGeometry Point: " + point.getGeometryObject().toString());
+            builder.include(point.getGeometryObject());
+            hasGeometry = true;
+          } else if (geometry instanceof KmlLineString) {
+            KmlLineString lineString = (KmlLineString) geometry;
+            for (LatLng latLng : lineString.getGeometryObject()) {
+              Log.d("processContainer", "MultiGeometry LineString Point: " + latLng.toString());
+              builder.include(latLng);
+              hasGeometry = true;
+            }
+          }
+        }
+      } else {
+        Log.d("processContainer", "Unknown geometry type: " + placemark.getGeometry().getGeometryType());
+      }
+    }
+
+    // Recursively process nested containers
+    for (KmlContainer nestedContainer : container.getContainers()) {
+      hasGeometry = processContainer(nestedContainer, builder) || hasGeometry;
+
+    }
+
+    return hasGeometry;
+  }
+
+  // GEOJSON layer functions //
+
+  // move maps camera to the layer
+  private void moveCameraToGeoJson(GeoJsonLayer geoJsonLayer) {
+    try {
+      LatLngBounds.Builder builder = new LatLngBounds.Builder();
+      boolean hasGeometry = false;
+
+      // Iterate through features in the GeoJsonLayer
+      for (GeoJsonFeature feature : geoJsonLayer.getFeatures()) {
+        if (feature.getGeometry() != null) {
+          if (feature.getGeometry() instanceof GeoJsonPoint) {
+            GeoJsonPoint point = (GeoJsonPoint) feature.getGeometry();
+            builder.include(point.getCoordinates());
+            hasGeometry = true;
+          } else if (feature.getGeometry() instanceof GeoJsonPolygon) {
+            GeoJsonPolygon polygon = (GeoJsonPolygon) feature.getGeometry();
+            for (List<LatLng> outerBoundary : polygon.getCoordinates()) {
+              for (LatLng latLng : outerBoundary) {
+                builder.include(latLng);
+              }
+            }
+            hasGeometry = true;
+          } else if (feature.getGeometry() instanceof GeoJsonLineString) {
+            GeoJsonLineString lineString = (GeoJsonLineString) feature.getGeometry();
+            for (LatLng latLng : lineString.getCoordinates()) {
+              builder.include(latLng);
+            }
+            hasGeometry = true;
+          } else if (feature.getGeometry() instanceof GeoJsonMultiPolygon) {
+            GeoJsonMultiPolygon multiPolygon = (GeoJsonMultiPolygon) feature.getGeometry();
+            for (GeoJsonPolygon polygon : multiPolygon.getPolygons()) {
+              for (List<LatLng> outerBoundary : polygon.getCoordinates()) {
+                for (LatLng latLng : outerBoundary) {
+                  builder.include(latLng);
+                }
+              }
+            }
+            hasGeometry = true;
+          }
+        }
+      }
+
+      if (hasGeometry) {
+        LatLngBounds bounds = builder.build();
+        int width = context.getResources().getDisplayMetrics().widthPixels;
+        int height = context.getResources().getDisplayMetrics().heightPixels;
+
+        // Create CameraUpdate to fit all geometries within bounds
+        CameraUpdate cameraUpdate = CameraUpdateFactory.newLatLngBounds(bounds, width, height, 0);
+
+        // Move the camera to the GeoJSON layer bounds
+        googleMap.animateCamera(cameraUpdate);
+      } else {
+        Log.d("moveCameraToGeoJson", "No geometry found in GeoJSON to move camera.");
+      }
+    } catch (Exception e) {
+      e.printStackTrace();
+    }
+  }
+
+  // fetch GeoJSON resource
+  private String loadGeoJsonFromResource(int resourceId) throws IOException {
+    InputStream inputStream = context.getResources().openRawResource(resourceId);
+    StringBuilder builder = new StringBuilder();
+    BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream));
+    String line;
+    while ((line = reader.readLine()) != null) {
+      builder.append(line);
+    }
+    reader.close();
+    return builder.toString();
+  }
+
+  private BitmapDescriptor getCustomMarkerIcon(String assetPath) {
+    
+
+      try {
+        if(assetPath.isEmpty() || assetPath == "icons/marker.png"){
+        Bitmap bitmap = BitmapFactory.decodeStream(context.getAssets().open("icons/marker.png"));
+        int defaultMarkerSize = (int) (32 *
+            context.getResources().getDisplayMetrics().density);
+  
+        // Resize the bitmap to match the default marker size
+        Bitmap resizedBitmap = Bitmap.createScaledBitmap(bitmap, defaultMarkerSize,
+            defaultMarkerSize, false);
+  
+        // Return resized custom marker icon
+        return BitmapDescriptorFactory.fromBitmap(resizedBitmap);
+      }
+      else{
+        Bitmap bitmap = BitmapFactory.decodeStream(context.getAssets().open(assetPath));
+        int defaultMarkerSize = (int) (40 *
+            context.getResources().getDisplayMetrics().density);
+  
+        // Resize the bitmap to match the default marker size
+        Bitmap resizedBitmap = Bitmap.createScaledBitmap(bitmap, defaultMarkerSize,
+            defaultMarkerSize, false);
+  
+        // Return resized custom marker icon
+        return BitmapDescriptorFactory.fromBitmap(resizedBitmap);
+      }
+    } catch (Exception e) {
+      e.printStackTrace();
+      Log.d("CustomMarker", e.toString());
+      // Return a default marker if custom marker fails
+      return BitmapDescriptorFactory.defaultMarker();
+    }
+  }
+
+
+  // custom point style for a geojson layer
+  private void getMarkerStyleForGeoJSON(GeoJsonLayer geojsonLayer,String assetPath){
+    for (GeoJsonFeature feature : geojsonLayer.getFeatures()) {
+      if (feature.getGeometry() != null) {
+        if (feature.getGeometry() instanceof GeoJsonPoint) {
+          GeoJsonPoint point = (GeoJsonPoint) feature.getGeometry();
+          LatLng position = point.getCoordinates();
+
+          // Check if the feature has a style with a marker icon
+          if (feature.getPointStyle() == null || feature.getPointStyle().getIcon() == null) {
+            GeoJsonPointStyle customPointStyle = new GeoJsonPointStyle();
+            BitmapDescriptor customIcon;
+            if (assetPath == null || assetPath.isEmpty()) {
+              customIcon = getCustomMarkerIcon("icons/marker.png");
+            } else {
+              customIcon = getCustomMarkerIcon(assetPath);
+            }
+            customPointStyle.setIcon(customIcon);
+
+            // Set the style for the feature
+            feature.setPointStyle(customPointStyle);
+          }
+
+        }
+      }
+    } 
+  }
+
+  // add GeoJSON layer to the map
+  private void addGeoJSON(int resourceId, String assetPath) {
+    try {
+      String geoJsonData = loadGeoJsonFromResource(resourceId);
+      JSONObject geoJsonObject = new JSONObject(geoJsonData);
+      currentGeoJsonLayer = new GeoJsonLayer(googleMap, geoJsonObject);
+      getMarkerStyleForGeoJSON(currentGeoJsonLayer, assetPath);
+      currentGeoJsonLayer.addLayerToMap();
+      moveCameraToGeoJson(currentGeoJsonLayer);
+    } catch (IOException | JSONException e) {
+      e.printStackTrace();
+
+    }
+  }
+
+  //online data function
+  public void addGeoJsonLayerFromFilePath(GoogleMap googleMap, String filePath) {
+    try {
+        // Create a File object from the file path
+        File file = new File(filePath);
+
+        // Log the file path
+        Log.d("GeoJson", "Loading GeoJSON file from: " + filePath);
+       
+
+        // Get an InputStream from the file
+        InputStream inputStream = new FileInputStream(file);
+        StringBuilder builder = new StringBuilder();
+    BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream));
+    String line;
+    while ((line = reader.readLine()) != null) {
+      builder.append(line);
+    }
+    reader.close();
+        String geoJsonDataString = builder.toString();
+        JSONObject geoJsonObject = new JSONObject(geoJsonDataString);
+        currentGeoJsonLayer = new GeoJsonLayer(googleMap, geoJsonObject);
+        getMarkerStyleForGeoJSON(currentGeoJsonLayer, "");
+        currentGeoJsonLayer.addLayerToMap();
+        moveCameraToGeoJson(currentGeoJsonLayer);
+
+    } catch (Exception e) {
+        e.printStackTrace();
+    }
+}
+
+  // HeatMap function //
+  // ->KML HeatMap functions
+  private void addKmlHeatmap(int resId) {
+    try {
+      KmlLayer kmlLayer = new KmlLayer(googleMap, resId, context);
+      kmlLayer.addLayerToMap();
+      Log.d("Heatmap", "KML file loaded successfully.");
+
+      List<LatLng> points = new ArrayList<>();
+      extractKmlGeometries(kmlLayer, points);
+
+      if (points.isEmpty()) {
+        Log.d("Heatmap", "No points found in KML for heatmap.");
+        return;
+      }
+
+      HeatmapTileProvider heatmapTileProvider = new HeatmapTileProvider.Builder()
+          .data(points)
+          .build();
+      moveCameraToKml(kmlLayer);
+      kmlLayer.removeLayerFromMap();
+
+      heatmapOverlay = googleMap.addTileOverlay(new TileOverlayOptions().tileProvider(heatmapTileProvider));
+      Log.d("Heatmap", "Heatmap added to the map.");
+    } catch (Exception e) {
+      Log.e("Heatmap", "Error adding KML heatmap", e);
+    }
+  }
+
+  private void extractKmlGeometries(KmlLayer kmlLayer, List<LatLng> points) {
+    if (kmlLayer != null) {
+      for (KmlContainer container : kmlLayer.getContainers()) {
+        if (container != null) {
+          Log.d("addKML", "Extracting geometries from container: " + container.getContainerId());
+          extractGeometriesFromContainer(container, points);
+        } else {
+          Log.d("addKML", "Container is null.");
+        }
+      }
+    } else {
+      Log.d("addKML", "KmlLayer is null.");
+    }
+  }
+
+  private void extractGeometriesFromContainer(KmlContainer container, List<LatLng> points) {
+    // Extract geometries from the container
+    for (KmlPlacemark placemark : container.getPlacemarks()) {
+      if (placemark != null && placemark.getGeometry() instanceof KmlPoint) {
+        KmlPoint point = (KmlPoint) placemark.getGeometry();
+        LatLng latLng = point.getGeometryObject();
+        if (latLng != null) {
+          points.add(latLng);
+          Log.d("Heatmap", "Added point to heatmap: " + latLng.toString());
+        } else {
+          Log.d("Heatmap", "Point geometry is null.");
+        }
+      } else {
+        Log.d("Heatmap", "Geometry is not a KmlPoint or placemark is null.");
+      }
+    }
+
+    // Recursively handle nested containers
+    for (KmlContainer nestedContainer : container.getContainers()) {
+      extractGeometriesFromContainer(nestedContainer, points);
+    }
+  }
+
+  // ->GeoJSON Heatmap functions
+  private void addGeoJSONHeatmap(int resId) {
+
+    ArrayList<WeightedLatLng> heatmapPoints = new ArrayList<>();
+    try {
+      String geoJsonData = loadGeoJsonFromResource(resId);
+      JSONObject geoJsonObject = new JSONObject(geoJsonData);
+      GeoJsonLayer geoJsonLayer = new GeoJsonLayer(googleMap, geoJsonObject);
+      geoJsonLayer.addLayerToMap();
+      for (GeoJsonFeature feature : geoJsonLayer.getFeatures()) {
+        if (feature.getGeometry() != null) {
+          if (feature.getGeometry() instanceof GeoJsonPoint) {
+            GeoJsonPoint point = (GeoJsonPoint) feature.getGeometry();
+            heatmapPoints.add(new WeightedLatLng(point.getCoordinates()));
+
+          } else if (feature.getGeometry() instanceof GeoJsonPolygon) {
+            GeoJsonPolygon polygon = (GeoJsonPolygon) feature.getGeometry();
+            for (List<LatLng> outerBoundary : polygon.getCoordinates()) {
+              for (LatLng latLng : outerBoundary) {
+                heatmapPoints.add(new WeightedLatLng(latLng));
+              }
+            }
+
+          } else if (feature.getGeometry() instanceof GeoJsonLineString) {
+            GeoJsonLineString lineString = (GeoJsonLineString) feature.getGeometry();
+            for (LatLng latLng : lineString.getCoordinates()) {
+              heatmapPoints.add(new WeightedLatLng(latLng));
+            }
+
+          } else if (feature.getGeometry() instanceof GeoJsonMultiPolygon) {
+            GeoJsonMultiPolygon multiPolygon = (GeoJsonMultiPolygon) feature.getGeometry();
+            for (GeoJsonPolygon polygon : multiPolygon.getPolygons()) {
+              for (List<LatLng> outerBoundary : polygon.getCoordinates()) {
+                for (LatLng latLng : outerBoundary) {
+                  heatmapPoints.add(new WeightedLatLng(latLng));
+                }
+              }
+            }
+
+          }
+        }
+      }
+      HeatmapTileProvider heatmapTileProvider = new HeatmapTileProvider.Builder()
+          .weightedData(heatmapPoints)
+          .radius(50) // Customize the radius
+          .build();
+      moveCameraToGeoJson(geoJsonLayer);
+      geoJsonLayer.removeLayerFromMap();
+      heatmapOverlay = googleMap.addTileOverlay(new TileOverlayOptions().tileProvider(heatmapTileProvider));
+
+    } catch (Exception e) {
+      e.printStackTrace();
+    }
+
+  }
+
+  // Clustering functions //
+  // ->KML clustering functions
+  private void addKmlClustering(int resId, ClusterManager<MyItem> customClusterManager) {
+    try {
+      KmlLayer kmlLayer = new KmlLayer(googleMap, resId, context);
+      kmlLayer.addLayerToMap();
+      List<LatLng> points = new ArrayList<>();
+      extractKmlGeometries(kmlLayer, points);
+      if (points.isEmpty()) {
+        Log.d("addKmlClustering", "No points found in KML for Clustering.");
+        return;
+      }
+      moveCameraToKml(kmlLayer);
+      kmlLayer.removeLayerFromMap();
+
+      for (LatLng point : points) {
+        customClusterManager.addItem(new MyItem(point.latitude, point.longitude, "", ""));
+      }
+
+      customClusterManager.cluster(); // Perform clustering
+
+    } catch (Exception e) {
+      Log.d("addKmlClustering", "Error processing KML: " + e.getMessage());
+      e.printStackTrace();
+    }
+  }
+
+  // -> GeoJSON Clustering function
+  private void addGeoJSONClustering(int resId ,ClusterManager<MyItem> customClusterManager) {
+    try {
+      String geoJsonData = loadGeoJsonFromResource(resId);
+      JSONObject geoJsonObject = new JSONObject(geoJsonData);
+      GeoJsonLayer geoJsonLayer = new GeoJsonLayer(googleMap, geoJsonObject);
+      geoJsonLayer.addLayerToMap();
+      List<LatLng> points = new ArrayList<>();
+      for (GeoJsonFeature feature : geoJsonLayer.getFeatures()) {
+        if (feature.getGeometry() != null) {
+          if (feature.getGeometry() instanceof GeoJsonPoint) {
+            GeoJsonPoint point = (GeoJsonPoint) feature.getGeometry();
+            points.add(point.getCoordinates());
+
+          } else if (feature.getGeometry() instanceof GeoJsonPolygon) {
+            GeoJsonPolygon polygon = (GeoJsonPolygon) feature.getGeometry();
+            for (List<LatLng> outerBoundary : polygon.getCoordinates()) {
+              for (LatLng latLng : outerBoundary) {
+                points.add(latLng);
+              }
+            }
+
+          } else if (feature.getGeometry() instanceof GeoJsonLineString) {
+            GeoJsonLineString lineString = (GeoJsonLineString) feature.getGeometry();
+            for (LatLng latLng : lineString.getCoordinates()) {
+              points.add(latLng);
+            }
+
+          } else if (feature.getGeometry() instanceof GeoJsonMultiPolygon) {
+            GeoJsonMultiPolygon multiPolygon = (GeoJsonMultiPolygon) feature.getGeometry();
+            for (GeoJsonPolygon polygon : multiPolygon.getPolygons()) {
+              for (List<LatLng> outerBoundary : polygon.getCoordinates()) {
+                for (LatLng latLng : outerBoundary) {
+                  points.add(latLng);
+                }
+              }
+            }
+
+          }
+        }
+      }
+      // code to fetch points for heatmap
+      for (LatLng point : points) {
+        customClusterManager.addItem(new MyItem(point.latitude, point.longitude, "", ""));
+      }
+      moveCameraToGeoJson(geoJsonLayer);
+      geoJsonLayer.removeLayerFromMap();
+      customClusterManager.cluster(); // Perform clustering
+    } catch (Exception e) {
+      e.printStackTrace();
+    }
+
+  }
+    
+
 
   @Override
   public void onMapClick(@NonNull LatLng latLng) {
