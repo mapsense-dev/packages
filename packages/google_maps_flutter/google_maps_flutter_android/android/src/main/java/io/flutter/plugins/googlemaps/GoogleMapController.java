@@ -50,6 +50,7 @@ import io.flutter.plugins.googlemaps.Messages.MapsCallbackApi;
 import io.flutter.plugins.googlemaps.Messages.MapsInspectorApi;
 import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
@@ -96,6 +97,8 @@ import java.io.File;
 import java.io.FileInputStream;
 
 //geojson
+import com.google.maps.android.data.Feature;
+import com.google.maps.android.data.Layer;
 import com.google.maps.android.data.geojson.GeoJsonFeature;
 import com.google.maps.android.data.geojson.GeoJsonLineString;
 import com.google.maps.android.data.geojson.GeoJsonLayer;
@@ -180,7 +183,6 @@ class GoogleMapController
   private @Nullable String initialMapStyle;
   private boolean lastSetStyleSucceeded;
   @VisibleForTesting List<Float> initialPadding;
-  private String CHANNEL = "plugins.flutter.dev/google_maps_android_0";
 
   GoogleMapController(
       int id,
@@ -199,6 +201,7 @@ class GoogleMapController
     MapsInspectorApi.setUp(binaryMessenger, Integer.toString(id), this);
     AssetManager assetManager = context.getAssets();
      // these lines are added for the native method channel to communicate with flutter app
+    String CHANNEL = "plugins.flutter.dev/google_maps_android_"+id;
      MethodChannel methodChannel = new MethodChannel(binaryMessenger, CHANNEL);
      methodChannel.setMethodCallHandler(this);
     this.lifecycleProvider = lifecycleProvider;
@@ -470,9 +473,7 @@ class GoogleMapController
   private void addKMLLayer(int resourceId) {
     try {
       currentKmlLayer = new KmlLayer(googleMap, resourceId, context);
-      Log.d("ADDKML", "KML layer fetched");
       currentKmlLayer.addLayerToMap();
-      Log.d("ADDKML", "KML layer added to the map");
       moveCameraToKml(currentKmlLayer);
 
     } catch (XmlPullParserException | IOException e) {
@@ -530,7 +531,6 @@ class GoogleMapController
 
       if (hasGeometry) {
         LatLngBounds bounds = builder.build();
-        Log.d("Bounds", "Southwest: " + bounds.southwest + ", Northeast: " + bounds.northeast);
 
         int width = context.getResources().getDisplayMetrics().widthPixels;
         int height = context.getResources().getDisplayMetrics().heightPixels;
@@ -575,19 +575,19 @@ class GoogleMapController
           if (geometry instanceof KmlPolygon) {
             KmlPolygon polygon = (KmlPolygon) geometry;
             for (LatLng latLng : polygon.getOuterBoundaryCoordinates()) {
-              Log.d("processContainer", "MultiGeometry Polygon Point: " + latLng.toString());
+      
               builder.include(latLng);
               hasGeometry = true;
             }
           } else if (geometry instanceof KmlPoint) {
             KmlPoint point = (KmlPoint) geometry;
-            Log.d("processContainer", "MultiGeometry Point: " + point.getGeometryObject().toString());
+          
             builder.include(point.getGeometryObject());
             hasGeometry = true;
           } else if (geometry instanceof KmlLineString) {
             KmlLineString lineString = (KmlLineString) geometry;
             for (LatLng latLng : lineString.getGeometryObject()) {
-              Log.d("processContainer", "MultiGeometry LineString Point: " + latLng.toString());
+             
               builder.include(latLng);
               hasGeometry = true;
             }
@@ -660,6 +660,12 @@ class GoogleMapController
 
         // Move the camera to the GeoJSON layer bounds
         googleMap.animateCamera(cameraUpdate);
+        geoJsonLayer.setOnFeatureClickListener(new Layer.OnFeatureClickListener() {
+          @Override
+          public void onFeatureClick(Feature feature) {
+             sendFeatureLatLngToFlutter(feature);   
+          }
+      });
       } else {
         Log.d("moveCameraToGeoJson", "No geometry found in GeoJSON to move camera.");
       }
@@ -746,6 +752,31 @@ class GoogleMapController
     } 
   }
 
+  // send GeojsonClickedMarker's latlng to flutter 
+  // this function is used to highlight the chart's point or bar ontap of a marker for elevation profile screen
+  private void sendFeatureLatLngToFlutter(Feature feature) {
+    double lat = 0; 
+    double lng = 0;
+    // Get the method channel based on the map id
+    String channelName = "plugins.flutter.dev/google_maps_android_" + id;
+    MethodChannel mapChannel = new MethodChannel(binaryMessenger, channelName);
+    if (feature.hasGeometry()) {
+      if (feature.getGeometry() instanceof GeoJsonPoint) {
+        GeoJsonPoint point = (GeoJsonPoint) feature.getGeometry();
+        lat = point.getCoordinates().latitude;
+        lng = point.getCoordinates().longitude;
+      } 
+      else if(feature.getGeometry() instanceof GeoJsonLineString) {
+        //TBD
+          }
+  }
+    
+    // Send the lat and lng as a List<Double> to Flutter
+    List<Double> coordinates = Arrays.asList(lat, lng);
+    
+    mapChannel.invokeMethod("map#featureTap", coordinates);
+}
+
   // add GeoJSON layer to the map
   private void addGeoJSON(int resourceId, String assetPath) {
     try {
@@ -798,7 +829,6 @@ class GoogleMapController
     try {
       KmlLayer kmlLayer = new KmlLayer(googleMap, resId, context);
       kmlLayer.addLayerToMap();
-      Log.d("Heatmap", "KML file loaded successfully.");
 
       List<LatLng> points = new ArrayList<>();
       extractKmlGeometries(kmlLayer, points);
@@ -844,7 +874,6 @@ class GoogleMapController
         LatLng latLng = point.getGeometryObject();
         if (latLng != null) {
           points.add(latLng);
-          Log.d("Heatmap", "Added point to heatmap: " + latLng.toString());
         } else {
           Log.d("Heatmap", "Point geometry is null.");
         }
